@@ -5,6 +5,10 @@ import { prisma } from "./db";
 
 export const { auth, handlers, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
+  // Behind Cloudflare Tunnel / any reverse proxy — Auth.js v5 refuses the
+  // request otherwise ("UntrustedHost"). Safe because we terminate TLS at the
+  // proxy we control.
+  trustHost: true,
   session: { strategy: "database" },
   providers: [
     Google({
