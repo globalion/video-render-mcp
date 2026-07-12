@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { auth } from "@/lib/auth";
+import { SignInButton } from "./signin-button";
 
 const CONFIG_SNIPPET = `{
   "mcpServers": {
@@ -39,16 +40,16 @@ export default async function LandingPage() {
               Get your API key →
             </Link>
           ) : (
-            // Plain <a> to the NextAuth signin endpoint. This is the standard
-            // Auth.js v5 flow and keeps the session cookie intact through the
-            // OAuth redirect chain — a form-action signIn() inside a Server
-            // Action was losing __Secure-authjs.session-token in production.
-            <a
-              href="/api/auth/signin?callbackUrl=%2Fdashboard"
-              className="rounded-lg bg-teal-500 px-5 py-2.5 text-sm font-semibold text-black hover:bg-teal-400"
-            >
-              Sign in with Google
-            </a>
+            // Client-component uses next-auth/react's signIn(). Two earlier
+            // approaches failed:
+            //  - a server-action signIn() inside a <form> lost the cookie on
+            //    the redirect issued by the action.
+            //  - a plain <a href="/api/auth/signin"> bounces back to "/"
+            //    because pages.signIn is set to "/".
+            // The React client signIn() POSTs to /api/auth/signin/google
+            // directly with the CSRF token and gets the cookie set on the
+            // normal HTTP response chain.
+            <SignInButton />
           )}
           <Link
             href="https://github.com/globalion/video-render-mcp"
