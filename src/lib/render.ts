@@ -82,9 +82,12 @@ function sceneWeight(scene: Scene): number {
     case "code":
       return Math.max(3, Math.min(6, scene.snippet.split("\n").length * 0.5));
     case "stat":
-      return 2;
+      // Give image-bearing stats a bit more air so the visual can breathe.
+      return scene.image ? 2.5 : 2;
     case "cta":
       return 2.5;
+    case "image":
+      return 3;
   }
 }
 

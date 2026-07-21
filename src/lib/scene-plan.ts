@@ -6,6 +6,17 @@ import { z } from "zod";
  * `inputProps`.
  */
 
+/**
+ * Optional image: either an https URL or a data: URL (base64-encoded).
+ * Data URLs let a client ship pixel-perfect mockups inline without any
+ * upload dance — Remotion accepts them via <Img src=...>.
+ */
+const imageUrlSchema = z
+  .string()
+  .refine((s) => s.startsWith("http://") || s.startsWith("https://") || s.startsWith("data:image/"), {
+    message: "image must be an http(s) URL or a data:image/... URL",
+  });
+
 export const sceneSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("title"),
@@ -23,11 +34,23 @@ export const sceneSchema = z.discriminatedUnion("type", [
     type: z.literal("stat"),
     big: z.string().describe("Big number or phrase, e.g. '11ms'"),
     small: z.string().describe("Small caption under it"),
+    image: imageUrlSchema
+      .optional()
+      .describe("Optional image shown next to the stat (e.g. a mockup or screenshot)"),
   }),
   z.object({
     type: z.literal("cta"),
     url: z.string(),
     copy: z.string(),
+  }),
+  z.object({
+    type: z.literal("image"),
+    src: imageUrlSchema.describe("The image to display full-frame (http(s) or data:image/...)"),
+    caption: z.string().optional().describe("Overlay caption at the bottom"),
+    kenBurns: z
+      .boolean()
+      .default(true)
+      .describe("Slow zoom + drift while on screen (Ken Burns). Default true."),
   }),
 ]);
 

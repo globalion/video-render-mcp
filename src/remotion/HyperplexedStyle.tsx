@@ -3,6 +3,7 @@ import { TitleScene } from "./scenes/TitleScene";
 import { CodeScene } from "./scenes/CodeScene";
 import { StatScene } from "./scenes/StatScene";
 import { CtaScene } from "./scenes/CtaScene";
+import { ImageScene } from "./scenes/ImageScene";
 import { Captions } from "./Captions";
 import type { RemotionInputProps, Scene, WordTiming } from "../lib/scene-plan";
 
@@ -63,8 +64,24 @@ function SceneRouter({
         />
       );
     case "stat":
-      return <StatScene big={scene.big} small={scene.small} accent={plan.accent} />;
+      return (
+        <StatScene
+          big={scene.big}
+          small={scene.small}
+          image={scene.image}
+          accent={plan.accent}
+        />
+      );
     case "cta":
       return <CtaScene url={scene.url} copy={scene.copy} accent={plan.accent} />;
+    case "image":
+      return (
+        <ImageScene
+          src={scene.src}
+          caption={scene.caption}
+          kenBurns={scene.kenBurns}
+          accent={plan.accent}
+        />
+      );
   }
 }
