@@ -20,12 +20,15 @@ const TOPUP_URL =
   (process.env.PUBLIC_BASE_URL?.replace(/\/$/, "") || "") + "/dashboard#credits";
 
 export const runtime = "nodejs";
-export const maxDuration = 300; // Remotion renders can be slow
+// Async response returns in <1s — but keep the ceiling generous for the
+// synth+render work that finishes AFTER the response is flushed. Node keeps
+// the promise alive; this just tells Next not to kill the worker early.
+export const maxDuration = 600;
 
 const PROTOCOL_VERSION = "2025-06-18";
 const SERVER_INFO = {
   name: "video-render-mcp",
-  version: "0.1.0",
+  version: "0.2.0",
 };
 
 /**
@@ -123,18 +126,22 @@ async function runTool(name: ToolName, args: ScenePlan, userId: string) {
       };
 
     case "render_video":
-      return doRender(args, userId);
+      return startRender(args, userId);
   }
 }
 
-async function doRender(plan: ScenePlan, userId: string) {
-  // Legacy quota (20/day) is now advisory — credits are the real limit.
-  // Keep this call so we still write to RenderJob for analytics.
+/**
+ * Enqueue an async render. Deducts credits up front, creates a
+ * RenderJob(status="pending"), kicks off the actual work in the background,
+ * and returns immediately with a jobId the caller polls.
+ *
+ * This shape sidesteps the Cloudflare Tunnel 100s hard cap on HTTP responses
+ * — full renders can take 3–5 minutes, but the RPC response lands in <1s.
+ */
+async function startRender(plan: ScenePlan, userId: string) {
+  // Legacy quota (20/day) is still tracked for analytics.
   await readDailyUsage(userId);
 
-  // Cost estimate based on target duration — actual might differ by up to
-  // ~10% depending on TTS pacing. We deduct the ESTIMATE up front and
-  // reconcile once we know the true duration.
   const upfront = quoteCredits(plan);
   const balanceAfter = await tryDeduct(userId, upfront.totalCredits, "render");
   if (balanceAfter === null) {
@@ -147,6 +154,48 @@ async function doRender(plan: ScenePlan, userId: string) {
   const job = await prisma.renderJob.create({
     data: { userId, status: "pending" },
   });
+
+  const statusUrl = publicStatusUrl(job.id);
+  const videoUrl = publicVideoUrl(job.id);
+
+  // Fire-and-forget: Node keeps the promise alive after we return the RPC
+  // response. Any error is logged + reflected on the RenderJob row so the
+  // client sees it on the next poll.
+  void runRenderJob(job.id, plan, userId, upfront.totalCredits, balanceAfter).catch(
+    (err) => console.error("[render] background job", job.id, "crashed:", err)
+  );
+
+  return {
+    content: [
+      {
+        type: "text",
+        text:
+          `Render queued as job ${job.id}. Poll ${statusUrl} until status=success, then fetch ${videoUrl}. ` +
+          `Estimate ${upfront.totalCredits} credits (${balanceAfter} left after upfront deduction — refunded on failure).`,
+      },
+    ],
+    structuredContent: {
+      jobId: job.id,
+      status: "pending",
+      statusUrl,
+      videoUrl,
+      creditsQuoted: upfront.totalCredits,
+      creditsRemaining: balanceAfter,
+      topupUrl: TOPUP_URL,
+    },
+  };
+}
+
+async function runRenderJob(
+  jobId: string,
+  plan: ScenePlan,
+  userId: string,
+  upfrontCredits: number,
+  balanceAfterDeduct: number
+): Promise<void> {
+  await prisma.renderJob
+    .update({ where: { id: jobId }, data: { status: "rendering" } })
+    .catch(() => undefined);
 
   try {
     const audio = await synthesize(plan.script, plan.voice);
@@ -164,18 +213,13 @@ async function doRender(plan: ScenePlan, userId: string) {
     // difference. If it was LONGER we eat the delta — cheaper than surprising
     // the user with a second deduction.
     const actual = quoteCredits(plan, result.durationSec);
-    let creditsRemaining = balanceAfter;
-    if (actual.totalCredits < upfront.totalCredits) {
-      const overcharge = upfront.totalCredits - actual.totalCredits;
-      await refund(userId, overcharge, job.id);
-      creditsRemaining = balanceAfter + overcharge;
+    if (actual.totalCredits < upfrontCredits) {
+      await refund(userId, upfrontCredits - actual.totalCredits, jobId);
     }
 
     const fileName = path.basename(result.filePath);
-    const videoUrl = publicUrlFor(fileName, job.id);
-
     await prisma.renderJob.update({
-      where: { id: job.id },
+      where: { id: jobId },
       data: {
         status: "success",
         durationSec: result.durationSec,
@@ -184,48 +228,31 @@ async function doRender(plan: ScenePlan, userId: string) {
       },
     });
 
-    const renamedPath = path.join(outputDir, `${job.id}.mp4`);
+    const renamedPath = path.join(outputDir, `${jobId}.mp4`);
     await fs.rename(result.filePath, renamedPath).catch(() => undefined);
-
-    const lowCredits = creditsRemaining < 50;
-    const lowNote = lowCredits
-      ? `\n⚠ Only ${creditsRemaining} credits left (~${Math.floor(creditsRemaining / actual.totalCredits)} more videos). Top up: ${TOPUP_URL}`
-      : "";
-
-    return {
-      content: [
-        {
-          type: "text",
-          text:
-            `Rendered ${plan.title} — ${result.durationSec.toFixed(1)}s, ${(result.bytes.length / 1024 / 1024).toFixed(2)} MB. Cost: ${actual.totalCredits} credits (${creditsRemaining} left).\n${videoUrl}${lowNote}`,
-        },
-      ],
-      structuredContent: {
-        videoUrl,
-        durationSec: result.durationSec,
-        sizeBytes: result.bytes.length,
-        creditsSpent: actual.totalCredits,
-        creditsRemaining,
-        topupUrl: TOPUP_URL,
-        provider: audio.provider,
-      },
-    };
   } catch (err) {
     // Render failed — refund every credit we deducted up front.
-    await refund(userId, upfront.totalCredits, job.id);
+    await refund(userId, upfrontCredits, jobId);
     await prisma.renderJob
       .update({
-        where: { id: job.id },
+        where: { id: jobId },
         data: { status: "failed", errorMessage: (err as Error).message.slice(0, 500) },
       })
       .catch(() => undefined);
-    throw err;
   }
+  // balanceAfterDeduct is captured for observability but not persisted here —
+  // the CreditTransaction table has the authoritative ledger.
+  void balanceAfterDeduct;
 }
 
-function publicUrlFor(_fileName: string, jobId: string): string {
+function publicVideoUrl(jobId: string): string {
   const base = process.env.PUBLIC_BASE_URL?.replace(/\/$/, "") || "";
   return `${base}/api/renders/${encodeURIComponent(jobId)}.mp4`;
+}
+
+function publicStatusUrl(jobId: string): string {
+  const base = process.env.PUBLIC_BASE_URL?.replace(/\/$/, "") || "";
+  return `${base}/api/jobs/${encodeURIComponent(jobId)}`;
 }
 
 // ---------- JSON-RPC helpers ----------

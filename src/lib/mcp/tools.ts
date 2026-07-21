@@ -20,7 +20,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: "render_video",
     description:
-      "Render an MP4 from a ScenePlan. Synthesises narration (msedge-tts, free) or ElevenLabs if the server has ELEVENLABS_API_KEY. Returns { videoUrl, durationSec, sizeBytes } — the videoUrl is a direct https link to the finished MP4, valid for 7 days.",
+      "Enqueue an async render of an MP4 from a ScenePlan. Returns immediately with { jobId, status: 'pending', statusUrl, videoUrl }. Poll statusUrl (GET, Bearer auth) until status='success', then fetch videoUrl (valid 7 days). Full renders take 60–300 seconds; the async shape sidesteps the Cloudflare Tunnel 100s HTTP cap. Narration uses msedge-tts (free) or ElevenLabs if the server has ELEVENLABS_API_KEY.",
     inputSchema: scenePlanSchema,
   },
 ] as const;
