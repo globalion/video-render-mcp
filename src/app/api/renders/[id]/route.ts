@@ -34,7 +34,7 @@ export async function GET(
       headers: {
         "Content-Type": "video/mp4",
         "Content-Length": String(bytes.length),
-        "Cache-Control": "public, max-age=604800, immutable",
+        "Cache-Control": "public, max-age=604800, immutable", "Access-Control-Allow-Origin": "*",
       },
     });
   } catch {

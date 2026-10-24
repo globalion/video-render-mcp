@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin
+      POSTGRES_PASSWORD: 0c2e14960e2dd1a5e25c4d226eb8a4e1f6a13a640e149bdf
       POSTGRES_DB: video_render_mcp
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -22,7 +22,7 @@ services:
     mem_limit: 4g
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://admin:admin@db:5432/video_render_mcp
+      DATABASE_URL: postgresql://admin:0c2e14960e2dd1a5e25c4d226eb8a4e1f6a13a640e149bdf@db:5432/video_render_mcp
     ports:
       - "3010:3000"
     depends_on:

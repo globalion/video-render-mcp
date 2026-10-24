@@ -1,0 +1,36 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: video_render_mcp
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d video_render_mcp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    mem_limit: 4g
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://admin:admin@db:5432/video_render_mcp
+    ports:
+      - "3010:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - renderdata:/app/data
+
+volumes:
+  pgdata:
+  renderdata:
